@@ -1,0 +1,171 @@
+import bytes
+
+// SHA-1 hash (RFC 3174).
+// 512-bit blocks, 160-bit (20 byte) digest.
+//
+// Usage:
+//   import sha1
+//   let digest = sha1.hash(bytes.from_string("hello"))
+//   let hex = sha1.hex(digest)
+
+// --- 32-bit helpers (SHA-1 operates on uint32) ---
+
+local fn u32(v: Int) -> Int = int.band(v, 0xFFFFFFFF)
+
+local fn rotl(v: Int, n: Int) -> Int =
+  u32(int.bor(int.bshl(v, n), int.bshr(int.band(v, 0xFFFFFFFF), 32 - n)))
+
+local fn read_u32_be(buf: Bytes, off: Int) -> Int =
+  int.bor(
+    int.bor(int.bshl(bytes.read_u8(buf, off), 24), int.bshl(bytes.read_u8(buf, off + 1), 16)),
+    int.bor(int.bshl(bytes.read_u8(buf, off + 2), 8), bytes.read_u8(buf, off + 3))
+  )
+
+local fn write_u32_be(buf: Bytes, off: Int, v: Int) -> Bytes = {
+  var b = buf
+  b = bytes.set(b, off, int.band(int.bshr(v, 24), 0xFF))
+  b = bytes.set(b, off + 1, int.band(int.bshr(v, 16), 0xFF))
+  b = bytes.set(b, off + 2, int.band(int.bshr(v, 8), 0xFF))
+  b = bytes.set(b, off + 3, int.band(v, 0xFF))
+  b
+}
+
+// --- Padding ---
+
+local fn pad(message: Bytes) -> Bytes = {
+  let msg_len = bytes.len(message)
+  let bit_len = msg_len * 8
+  // Append 0x80
+  var padded = bytes.concat(message, bytes.from_list([0x80]))
+  // Pad with zeros until length ≡ 56 mod 64
+  let target = ((msg_len + 9 + 63) / 64) * 64
+  let zeros_needed = target - msg_len - 1 - 8
+  for i in 0..zeros_needed {
+    padded = bytes.concat(padded, bytes.from_list([0x00]))
+  }
+  // Append 64-bit big-endian message length
+  var len_bytes = bytes.new(8)
+  // bit_len fits in lower 32 bits for messages < 512MB
+  len_bytes = write_u32_be(len_bytes, 0, 0)
+  len_bytes = write_u32_be(len_bytes, 4, bit_len)
+  bytes.concat(padded, len_bytes)
+}
+
+// --- Hash ---
+
+fn hash(message: Bytes) -> Bytes = {
+  let padded = pad(message)
+  let num_blocks = bytes.len(padded) / 64
+
+  // Initial hash values
+  var h0 = 0x67452301
+  var h1 = 0xEFCDAB89
+  var h2 = 0x98BADCFE
+  var h3 = 0x10325476
+  var h4 = 0xC3D2E1F0
+
+  for block in 0..num_blocks {
+    let base = block * 64
+
+    // Message schedule: 80 x 32-bit words
+    var w = bytes.new(320)
+    for i in 0..16 {
+      let val = read_u32_be(padded, base + i * 4)
+      w = write_u32_be(w, i * 4, val)
+    }
+    for i in 16..80 {
+      let val = int.bxor(
+        int.bxor(read_u32_be(w, (i - 3) * 4), read_u32_be(w, (i - 8) * 4)),
+        int.bxor(read_u32_be(w, (i - 14) * 4), read_u32_be(w, (i - 16) * 4))
+      )
+      w = write_u32_be(w, i * 4, rotl(val, 1))
+    }
+
+    var a = h0
+    var b = h1
+    var c = h2
+    var d = h3
+    var e = h4
+
+    for i in 0..80 {
+      let f = if i < 20 then u32(int.bor(int.band(b, c), int.band(int.bxor(b, 0xFFFFFFFF), d)))
+        else if i < 40 then u32(int.bxor(int.bxor(b, c), d))
+        else if i < 60 then u32(int.bor(int.bor(int.band(b, c), int.band(b, d)), int.band(c, d)))
+        else u32(int.bxor(int.bxor(b, c), d))
+
+      let k = if i < 20 then 0x5A827999
+        else if i < 40 then 0x6ED9EBA1
+        else if i < 60 then 0x8F1BBCDC
+        else 0xCA62C1D6
+
+      let wi = read_u32_be(w, i * 4)
+      let temp = u32(u32(rotl(a, 5) + f) + u32(e + u32(k + wi)))
+      e = d
+      d = c
+      c = rotl(b, 30)
+      b = a
+      a = temp
+    }
+
+    h0 = u32(h0 + a)
+    h1 = u32(h1 + b)
+    h2 = u32(h2 + c)
+    h3 = u32(h3 + d)
+    h4 = u32(h4 + e)
+  }
+
+  var digest = bytes.new(20)
+  digest = write_u32_be(digest, 0, h0)
+  digest = write_u32_be(digest, 4, h1)
+  digest = write_u32_be(digest, 8, h2)
+  digest = write_u32_be(digest, 12, h3)
+  digest = write_u32_be(digest, 16, h4)
+  digest
+}
+
+// --- Hex output ---
+
+local fn nibble_hex(v: Int) -> String = {
+  match v {
+    0 => "0",  1 => "1",  2 => "2",  3 => "3",
+    4 => "4",  5 => "5",  6 => "6",  7 => "7",
+    8 => "8",  9 => "9",  10 => "a", 11 => "b",
+    12 => "c", 13 => "d", 14 => "e", 15 => "f",
+    _ => "0",
+  }
+}
+
+fn hex(digest: Bytes) -> String = {
+  var result = ""
+  for i in 0..bytes.len(digest) {
+    let b = bytes.read_u8(digest, i)
+    result = "${result}${nibble_hex(int.bshr(b, 4))}${nibble_hex(int.band(b, 0x0F))}"
+  }
+  result
+}
+
+// --- Tests (RFC 3174 test vectors) ---
+
+test "empty string" {
+  assert_eq(hex(hash(bytes.from_string(""))), "da39a3ee5e6b4b0d3255bfef95601890afd80709")
+}
+
+test "abc" {
+  assert_eq(hex(hash(bytes.from_string("abc"))), "a9993e364706816aba3e25717850c26c9cd0d89d")
+}
+
+test "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" {
+  assert_eq(hex(hash(bytes.from_string("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"))), "84983e441c3bd26ebaae4aa1f95129e5e54670f1")
+}
+
+test "a repeated 1 time" {
+  assert_eq(hex(hash(bytes.from_string("a"))), "86f7e437faa5a7fce15d1ddcb9eaeaea377667b8")
+}
+
+test "digest is 20 bytes" {
+  assert_eq(bytes.len(hash(bytes.from_string("test"))), 20)
+}
+
+test "0123456701234567012345670123456701234567012345670123456789" {
+  assert_eq(hex(hash(bytes.from_string("0123456701234567012345670123456701234567012345670123456789"))), "d637bdad3786dbb2b74470b334fd96aecd1bc0fe")
+}
