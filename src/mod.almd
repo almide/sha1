@@ -53,6 +53,7 @@ local fn pad(message: Bytes) -> Bytes = {
 
 // --- Hash ---
 
+@inline_rust("sha1_native::native_sha1_hash(&{message})")
 fn hash(message: Bytes) -> Bytes = {
   let padded = pad(message)
   let num_blocks = bytes.len(padded) / 64

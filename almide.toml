@@ -1,3 +1,6 @@
 [package]
 name = "sha1"
 version = "0.1.0"
+
+[native-deps]
+sha1_crate = { package = "sha1", version = "0.10" }
