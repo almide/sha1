@@ -40,7 +40,7 @@ local fn pad(message: Bytes) -> Bytes = {
   // Pad with zeros until length ≡ 56 mod 64
   let target = ((msg_len + 9 + 63) / 64) * 64
   let zeros_needed = target - msg_len - 1 - 8
-  for i in 0..zeros_needed {
+  for i in 0..<zeros_needed {
     padded = padded + bytes.from_list([0x00])
   }
   // Append 64-bit big-endian message length
@@ -65,16 +65,16 @@ fn hash(message: Bytes) -> Bytes = {
   var h3 = 0x10325476
   var h4 = 0xC3D2E1F0
 
-  for block in 0..num_blocks {
+  for block in 0..<num_blocks {
     let base = block * 64
 
     // Message schedule: 80 x 32-bit words
     var w = bytes.zeros(320)
-    for i in 0..16 {
+    for i in 0..<16 {
       let val = read_u32_be(padded, base + i * 4)
       w = write_u32_be(w, i * 4, val)
     }
-    for i in 16..80 {
+    for i in 16..<80 {
       let val = int.bxor(
         int.bxor(read_u32_be(w, (i - 3) * 4), read_u32_be(w, (i - 8) * 4)),
         int.bxor(read_u32_be(w, (i - 14) * 4), read_u32_be(w, (i - 16) * 4))
@@ -88,7 +88,7 @@ fn hash(message: Bytes) -> Bytes = {
     var d = h3
     var e = h4
 
-    for i in 0..80 {
+    for i in 0..<80 {
       let f = if i < 20 then u32(int.bor(int.band(b, c), int.band(int.bxor(b, 0xFFFFFFFF), d)))
         else if i < 40 then u32(int.bxor(int.bxor(b, c), d))
         else if i < 60 then u32(int.bor(int.bor(int.band(b, c), int.band(b, d)), int.band(c, d)))
@@ -138,7 +138,7 @@ local fn nibble_hex(v: Int) -> String = {
 
 fn hex(digest: Bytes) -> String = {
   var result = ""
-  for i in 0..bytes.len(digest) {
+  for i in 0..<bytes.len(digest) {
     let b = bytes.get(digest, i) ?? 0
     result = "${result}${nibble_hex(int.bshr(b, 4))}${nibble_hex(int.band(b, 0x0F))}"
   }
